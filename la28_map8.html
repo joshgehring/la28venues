@@ -1,0 +1,1018 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LA28 Olympic Venues & Government Representatives</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            background-color: #f4f4f4;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+        header {
+            background-color: #002664; /* Olympic Blue */
+            color: white;
+            padding: 15px 20px;
+            text-align: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            z-index: 1000;
+            position: relative;
+        }
+        h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+        p.subtitle {
+            margin: 5px 0 0 0;
+            font-size: 14px;
+            color: #e0e0e0;
+        }
+        .map-container {
+            display: flex;
+            flex: 1;
+            position: relative;
+        }
+        #main-map {
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+        
+        /* Bottom Left Mini Map */
+        #mini-map-container {
+            position: absolute;
+            bottom: 30px;
+            left: 30px;
+            width: 220px;
+            height: 180px;
+            background: white;
+            border: 2px solid #002664;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 1000;
+            overflow: hidden;
+            transition: transform 0.2s ease;
+        }
+        
+        #mini-map-container:hover {
+            transform: scale(1.03); 
+            box-shadow: 0 6px 16px rgba(0,0,0,0.4);
+        }
+
+        #mini-map {
+            width: 100%;
+            height: 100%;
+            background: #eef5f9;
+        }
+        
+        #mini-map-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2000;
+            cursor: pointer;
+            background-color: rgba(255, 255, 255, 0);
+            transition: background-color 0.2s;
+        }
+
+        #mini-map-overlay:hover {
+            background-color: rgba(255, 255, 255, 0.15);
+        }
+
+        /* --- LEAFLET ICON OVERRIDE --- */
+        .custom-div-icon {
+            overflow: visible !important; /* Ensure bump animation isn't clipped by Leaflet */
+            background: transparent;
+            border: none;
+        }
+
+        /* --- DYNAMIC PIN STYLING & BUMP ANIMATION --- */
+        .marker-dot {
+            border: 2px solid white; 
+            border-radius: 50%; 
+            width: 14px; 
+            height: 14px; 
+            box-shadow: 0 0 4px rgba(0,0,0,0.5);
+            box-sizing: border-box;
+            transform-origin: center;
+        }
+
+        /* Tactile bump animation upon click */
+        @keyframes click-bump {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.5); }
+            100% { transform: scale(1); }
+        }
+        
+        .bump-marker .marker-dot {
+            animation: click-bump 0.3s ease-out;
+        }
+
+        /* --- CUSTOM FLOATING OVERLAY WITH FADE --- */
+        #custom-overlay {
+            position: absolute;
+            z-index: 3000; 
+            pointer-events: none; 
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.2s ease, visibility 0.2s ease;
+        }
+
+        /* Toggled via JS to fade in/out smoothly */
+        #custom-overlay.visible {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        /* Activates interactability for emails when locked */
+        #custom-overlay.locked {
+            pointer-events: auto;
+        }
+
+        #overlay-content {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 3px 14px rgba(0,0,0,0.4);
+            min-width: 220px;
+            position: relative;
+        }
+
+        #overlay-tail {
+            position: absolute;
+            width: 0;
+            height: 0;
+        }
+
+        .popup-title {
+            font-weight: bold;
+            font-size: 16px;
+            color: #333;
+            margin-bottom: 8px;
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 4px;
+        }
+        .popup-info {
+            font-size: 13px;
+            margin: 4px 0;
+            line-height: 1.5;
+        }
+        .popup-info span.rep-label {
+            font-weight: bold;
+            color: #333;
+        }
+        .zone-label {
+            font-weight: 800;
+            font-size: 14px;
+            text-transform: uppercase;
+        }
+        a.rep-link {
+            color: #555; 
+            text-decoration: underline;
+        }
+        a.rep-link:hover {
+            color: #d6001c; 
+        }
+    </style>
+</head>
+<body>
+
+    <header id="main-header">
+        <h1>LA28 Olympic Venues & Government Jurisdictions</h1>
+        <p class="subtitle">Hover over a venue to view respective local and state representatives.</p>
+    </header>
+
+    <div class="map-container" id="map-container">
+        <div id="main-map"></div>
+        <div id="mini-map-container" title="Click to swap map scope">
+            <div id="mini-map"></div>
+            <div id="mini-map-overlay"></div> 
+        </div>
+        
+        <div id="custom-overlay">
+            <div id="overlay-content"></div>
+            <div id="overlay-tail"></div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script>
+        const allVenues = [
+  {
+    "Venue": "DTLA Arena",
+    "State Senator": "Lola Smallwood-Cuevas (SD-28)",
+    "State Senator Email": "senator.smallwood-cuevas@senate.ca.gov",
+    "Assemblymember": "Sade Elhawary (AD-57)",
+    "Assemblymember Email": "assemblymember.elhawary@assembly.ca.gov",
+    "County Supervisor": "Holly Mitchell (District 2)",
+    "County Supervisor Email": "HollyJMitchell@bos.lacounty.gov",
+    "LA City Councilmember": "Curren D. Price, Jr. (CD-9)",
+    "LA City Councilmember Email": "councilmember.price@lacity.org",
+    "Zone": "DTLA",
+    "Lat": 34.043,
+    "Lon": -118.2673
+  },
+  {
+    "Venue": "LA Convention Center Halls 1-3",
+    "State Senator": "Lola Smallwood-Cuevas (SD-28)",
+    "State Senator Email": "senator.smallwood-cuevas@senate.ca.gov",
+    "Assemblymember": "Sade Elhawary (AD-57)",
+    "Assemblymember Email": "assemblymember.elhawary@assembly.ca.gov",
+    "County Supervisor": "Holly Mitchell (District 2)",
+    "County Supervisor Email": "HollyJMitchell@bos.lacounty.gov",
+    "LA City Councilmember": "Curren D. Price, Jr. (CD-9)",
+    "LA City Councilmember Email": "councilmember.price@lacity.org",
+    "Zone": "DTLA",
+    "Lat": 34.0403,
+    "Lon": -118.2696
+  },
+  {
+    "Venue": "Dodger Stadium",
+    "State Senator": "Maria Elena Durazo (SD-26)",
+    "State Senator Email": "senator.durazo@senate.ca.gov",
+    "Assemblymember": "Mark Gonz\u00e1lez (AD-54)",
+    "Assemblymember Email": "assemblymember.gonzalez@assembly.ca.gov",
+    "County Supervisor": "Hilda Solis (District 1)",
+    "County Supervisor Email": "firstdistrict@bos.lacounty.gov",
+    "LA City Councilmember": "Eunisses Hernandez (CD-1)",
+    "LA City Councilmember Email": "councilmember.eunisses.hernandez@lacity.org",
+    "Zone": "DTLA",
+    "Lat": 34.0739,
+    "Lon": -118.24
+  },
+  {
+    "Venue": "Peacock Theater",
+    "State Senator": "Lola Smallwood-Cuevas (SD-28)",
+    "State Senator Email": "senator.smallwood-cuevas@senate.ca.gov",
+    "Assemblymember": "Sade Elhawary (AD-57)",
+    "Assemblymember Email": "assemblymember.elhawary@assembly.ca.gov",
+    "County Supervisor": "Holly Mitchell (District 2)",
+    "County Supervisor Email": "HollyJMitchell@bos.lacounty.gov",
+    "LA City Councilmember": "Curren D. Price, Jr. (CD-9)",
+    "LA City Councilmember Email": "councilmember.price@lacity.org",
+    "Zone": "DTLA",
+    "Lat": 34.0443,
+    "Lon": -118.2673
+  },
+  {
+    "Venue": "LA Memorial Coliseum",
+    "State Senator": "Lola Smallwood-Cuevas (SD-28)",
+    "State Senator Email": "senator.smallwood-cuevas@senate.ca.gov",
+    "Assemblymember": "Sade Elhawary (AD-57)",
+    "Assemblymember Email": "assemblymember.elhawary@assembly.ca.gov",
+    "County Supervisor": "Holly Mitchell (District 2)",
+    "County Supervisor Email": "HollyJMitchell@bos.lacounty.gov",
+    "LA City Councilmember": "Curren D. Price, Jr. (CD-9)",
+    "LA City Councilmember Email": "councilmember.price@lacity.org",
+    "Zone": "Exposition Park",
+    "Lat": 34.0141,
+    "Lon": -118.2879
+  },
+  {
+    "Venue": "Exposition Park Stadium",
+    "State Senator": "Lola Smallwood-Cuevas (SD-28)",
+    "State Senator Email": "senator.smallwood-cuevas@senate.ca.gov",
+    "Assemblymember": "Sade Elhawary (AD-57)",
+    "Assemblymember Email": "assemblymember.elhawary@assembly.ca.gov",
+    "County Supervisor": "Holly Mitchell (District 2)",
+    "County Supervisor Email": "HollyJMitchell@bos.lacounty.gov",
+    "LA City Councilmember": "Curren D. Price, Jr. (CD-9)",
+    "LA City Councilmember Email": "councilmember.price@lacity.org",
+    "Zone": "Exposition Park",
+    "Lat": 34.0131,
+    "Lon": -118.285
+  },
+  {
+    "Venue": "Galen Center",
+    "State Senator": "Lola Smallwood-Cuevas (SD-28)",
+    "State Senator Email": "senator.smallwood-cuevas@senate.ca.gov",
+    "Assemblymember": "Sade Elhawary (AD-57)",
+    "Assemblymember Email": "assemblymember.elhawary@assembly.ca.gov",
+    "County Supervisor": "Holly Mitchell (District 2)",
+    "County Supervisor Email": "HollyJMitchell@bos.lacounty.gov",
+    "LA City Councilmember": "Curren D. Price, Jr. (CD-9)",
+    "LA City Councilmember Email": "councilmember.price@lacity.org",
+    "Zone": "Exposition Park",
+    "Lat": 34.021,
+    "Lon": -118.28
+  },
+  {
+    "Venue": "Port of Los Angeles",
+    "State Senator": "Laura Richardson (SD-35)",
+    "State Senator Email": "senator.richardson@senate.ca.gov",
+    "Assemblymember": "Mike Gipson (AD-65)",
+    "Assemblymember Email": "assemblymember.gipson@assembly.ca.gov",
+    "County Supervisor": "Janice Hahn (District 4)",
+    "County Supervisor Email": "FourthDistrict@bos.lacounty.gov",
+    "LA City Councilmember": "Tim McOsker (CD-15)",
+    "LA City Councilmember Email": "councilmember.mcosker@lacity.org",
+    "Zone": "N/A",
+    "Lat": 33.7381,
+    "Lon": -118.2647
+  },
+  {
+    "Venue": "Rivera Country Club",
+    "State Senator": "Ben Allen (SD-24)",
+    "State Senator Email": "senator.allen@senate.ca.gov",
+    "Assemblymember": "Jacqui Irwin (AD-42)",
+    "Assemblymember Email": "assemblymember.irwin@assembly.ca.gov",
+    "County Supervisor": "Lindsey Horvath (District 3)",
+    "County Supervisor Email": "ThirdDistrict@bos.lacounty.gov",
+    "LA City Councilmember": "Traci Park (CD-11)",
+    "LA City Councilmember Email": "councilmember.park@lacity.org",
+    "Zone": "Rivera",
+    "Lat": 34.0504,
+    "Lon": -118.5015
+  },
+  {
+    "Venue": "Comcast Squash Center at Universal Studios",
+    "State Senator": "Henry Stern (SD-27)",
+    "State Senator Email": "senator.stern@senate.ca.gov",
+    "Assemblymember": "Rick Chavez Zbur (AD-51)",
+    "Assemblymember Email": "assemblymember.zbur@assembly.ca.gov",
+    "County Supervisor": "Lindsey Horvath (District 3)",
+    "County Supervisor Email": "ThirdDistrict@bos.lacounty.gov",
+    "LA City Councilmember": "Unincorporated",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "Universal City",
+    "Lat": 34.1381,
+    "Lon": -118.3534
+  },
+  {
+    "Venue": "Valley Complex 1-4",
+    "State Senator": "Henry Stern (SD-27)",
+    "State Senator Email": "senator.stern@senate.ca.gov",
+    "Assemblymember": "Jesse Gabriel (AD-46)",
+    "Assemblymember Email": "assemblymember.gabriel@assembly.ca.gov",
+    "County Supervisor": "Lindsey Horvath (District 3)",
+    "County Supervisor Email": "ThirdDistrict@bos.lacounty.gov",
+    "LA City Councilmember": "Imelda Padilla (CD-6)",
+    "LA City Councilmember Email": "councilmember.padilla@lacity.org",
+    "Zone": "Valley",
+    "Lat": 34.1685,
+    "Lon": -118.475
+  },
+  {
+    "Venue": "Venice Beach",
+    "State Senator": "Ben Allen (SD-24)",
+    "State Senator Email": "senator.allen@senate.ca.gov",
+    "Assemblymember": "Tina McKinnor (AD-61)",
+    "Assemblymember Email": "assemblymember.mckinnor@assembly.ca.gov",
+    "County Supervisor": "Lindsey Horvath (District 3)",
+    "County Supervisor Email": "ThirdDistrict@bos.lacounty.gov",
+    "LA City Councilmember": "Traci Park (CD-11)",
+    "LA City Councilmember Email": "councilmember.park@lacity.org",
+    "Zone": "Venice",
+    "Lat": 33.985,
+    "Lon": -118.4695
+  },
+  {
+    "Venue": "Venice Beach Boardwalk",
+    "State Senator": "Ben Allen (SD-24)",
+    "State Senator Email": "senator.allen@senate.ca.gov",
+    "Assemblymember": "Tina McKinnor (AD-61)",
+    "Assemblymember Email": "assemblymember.mckinnor@assembly.ca.gov",
+    "County Supervisor": "Lindsey Horvath (District 3)",
+    "County Supervisor Email": "ThirdDistrict@bos.lacounty.gov",
+    "LA City Councilmember": "Traci Park (CD-11)",
+    "LA City Councilmember Email": "councilmember.park@lacity.org",
+    "Zone": "Venice",
+    "Lat": 33.987,
+    "Lon": -118.473
+  },
+  {
+    "Venue": "Carson Field",
+    "State Senator": "Laura Richardson (SD-35)",
+    "State Senator Email": "senator.richardson@senate.ca.gov",
+    "Assemblymember": "Mike Gipson (AD-65)",
+    "Assemblymember Email": "assemblymember.gipson@assembly.ca.gov",
+    "County Supervisor": "Holly Mitchell (District 2)",
+    "County Supervisor Email": "HollyJMitchell@bos.lacounty.gov",
+    "LA City Councilmember": "NaN",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "Carson",
+    "Lat": 33.8644,
+    "Lon": -118.2611
+  },
+  {
+    "Venue": "Carson Stadium",
+    "State Senator": "Laura Richardson (SD-35)",
+    "State Senator Email": "senator.richardson@senate.ca.gov",
+    "Assemblymember": "Mike Gipson (AD-65)",
+    "Assemblymember Email": "assemblymember.gipson@assembly.ca.gov",
+    "County Supervisor": "Holly Mitchell (District 2)",
+    "County Supervisor Email": "HollyJMitchell@bos.lacounty.gov",
+    "LA City Councilmember": "NaN",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "Carson",
+    "Lat": 33.8644,
+    "Lon": -118.2611
+  },
+  {
+    "Venue": "Carson Courts",
+    "State Senator": "Laura Richardson (SD-35)",
+    "State Senator Email": "senator.richardson@senate.ca.gov",
+    "Assemblymember": "Mike Gipson (AD-65)",
+    "Assemblymember Email": "assemblymember.gipson@assembly.ca.gov",
+    "County Supervisor": "Holly Mitchell (District 2)",
+    "County Supervisor Email": "HollyJMitchell@bos.lacounty.gov",
+    "LA City Councilmember": "NaN",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "Carson",
+    "Lat": 33.8644,
+    "Lon": -118.2611
+  },
+  {
+    "Venue": "Carson Velodrome",
+    "State Senator": "Laura Richardson (SD-35)",
+    "State Senator Email": "senator.richardson@senate.ca.gov",
+    "Assemblymember": "Mike Gipson (AD-65)",
+    "Assemblymember Email": "assemblymember.gipson@assembly.ca.gov",
+    "County Supervisor": "Holly Mitchell (District 2)",
+    "County Supervisor Email": "HollyJMitchell@bos.lacounty.gov",
+    "LA City Councilmember": "NaN",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "Carson",
+    "Lat": 33.8596,
+    "Lon": -118.26
+  },
+  {
+    "Venue": "Intuit Dome",
+    "State Senator": "Laura Richardson (SD-35)",
+    "State Senator Email": "senator.richardson@senate.ca.gov",
+    "Assemblymember": "Tina McKinnor (AD-61)",
+    "Assemblymember Email": "assemblymember.mckinnor@assembly.ca.gov",
+    "County Supervisor": "Holly Mitchell (District 2)",
+    "County Supervisor Email": "HollyJMitchell@bos.lacounty.gov",
+    "LA City Councilmember": "NaN",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "Inglewood",
+    "Lat": 33.9425,
+    "Lon": -118.344
+  },
+  {
+    "Venue": "2028 Stadium",
+    "State Senator": "Laura Richardson (SD-35)",
+    "State Senator Email": "senator.richardson@senate.ca.gov",
+    "Assemblymember": "Tina McKinnor (AD-61)",
+    "Assemblymember Email": "assemblymember.mckinnor@assembly.ca.gov",
+    "County Supervisor": "Holly Mitchell (District 2)",
+    "County Supervisor Email": "HollyJMitchell@bos.lacounty.gov",
+    "LA City Councilmember": "NaN",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "Inglewood",
+    "Lat": 33.9534,
+    "Lon": -118.3387
+  },
+  {
+    "Venue": "Marine Stadium",
+    "State Senator": "Lena A. Gonzalez (SD-33)",
+    "State Senator Email": "senator.gonzalez@senate.ca.gov",
+    "Assemblymember": "Josh Lowenthal (AD-69)",
+    "Assemblymember Email": "assemblymember.lowenthal@assembly.ca.gov",
+    "County Supervisor": "Janice Hahn (District 4)",
+    "County Supervisor Email": "FourthDistrict@bos.lacounty.gov",
+    "LA City Councilmember": "NaN",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "Long Beach",
+    "Lat": 33.761,
+    "Lon": -118.1215
+  },
+  {
+    "Venue": "Belmont Shore",
+    "State Senator": "Lena A. Gonzalez (SD-33)",
+    "State Senator Email": "senator.gonzalez@senate.ca.gov",
+    "Assemblymember": "Josh Lowenthal (AD-69)",
+    "Assemblymember Email": "assemblymember.lowenthal@assembly.ca.gov",
+    "County Supervisor": "Janice Hahn (District 4)",
+    "County Supervisor Email": "FourthDistrict@bos.lacounty.gov",
+    "LA City Councilmember": "NaN",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "Long Beach",
+    "Lat": 33.754,
+    "Lon": -118.134
+  },
+  {
+    "Venue": "Long Beach Arena",
+    "State Senator": "Lena A. Gonzalez (SD-33)",
+    "State Senator Email": "senator.gonzalez@senate.ca.gov",
+    "Assemblymember": "Josh Lowenthal (AD-69)",
+    "Assemblymember Email": "assemblymember.lowenthal@assembly.ca.gov",
+    "County Supervisor": "Janice Hahn (District 4)",
+    "County Supervisor Email": "FourthDistrict@bos.lacounty.gov",
+    "LA City Councilmember": "NaN",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "Long Beach",
+    "Lat": 33.7656,
+    "Lon": -118.1883
+  },
+  {
+    "Venue": "Long Beach Target Shooting Hall",
+    "State Senator": "Lena A. Gonzalez (SD-33)",
+    "State Senator Email": "senator.gonzalez@senate.ca.gov",
+    "Assemblymember": "Josh Lowenthal (AD-69)",
+    "Assemblymember Email": "assemblymember.lowenthal@assembly.ca.gov",
+    "County Supervisor": "Janice Hahn (District 4)",
+    "County Supervisor Email": "FourthDistrict@bos.lacounty.gov",
+    "LA City Councilmember": "NaN",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "Long Beach",
+    "Lat": 33.7656,
+    "Lon": -118.1883
+  },
+  {
+    "Venue": "Long Beach Aquatics Center",
+    "State Senator": "Lena A. Gonzalez (SD-33)",
+    "State Senator Email": "senator.gonzalez@senate.ca.gov",
+    "Assemblymember": "Josh Lowenthal (AD-69)",
+    "Assemblymember Email": "assemblymember.lowenthal@assembly.ca.gov",
+    "County Supervisor": "Janice Hahn (District 4)",
+    "County Supervisor Email": "FourthDistrict@bos.lacounty.gov",
+    "LA City Councilmember": "NaN",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "Long Beach",
+    "Lat": 33.765,
+    "Lon": -118.189
+  },
+  {
+    "Venue": "Alamitos Beach Stadium",
+    "State Senator": "Lena A. Gonzalez (SD-33)",
+    "State Senator Email": "senator.gonzalez@senate.ca.gov",
+    "Assemblymember": "Josh Lowenthal (AD-69)",
+    "Assemblymember Email": "assemblymember.lowenthal@assembly.ca.gov",
+    "County Supervisor": "Janice Hahn (District 4)",
+    "County Supervisor Email": "FourthDistrict@bos.lacounty.gov",
+    "LA City Councilmember": "NaN",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "Long Beach",
+    "Lat": 33.7628,
+    "Lon": -118.1725
+  },
+  {
+    "Venue": "Long Beach Climbing Theater",
+    "State Senator": "Lena A. Gonzalez (SD-33)",
+    "State Senator Email": "senator.gonzalez@senate.ca.gov",
+    "Assemblymember": "Josh Lowenthal (AD-69)",
+    "Assemblymember Email": "assemblymember.lowenthal@assembly.ca.gov",
+    "County Supervisor": "Janice Hahn (District 4)",
+    "County Supervisor Email": "FourthDistrict@bos.lacounty.gov",
+    "LA City Councilmember": "NaN",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "Long Beach",
+    "Lat": 33.765,
+    "Lon": -118.189
+  },
+  {
+    "Venue": "Rose Bowl Aquatics Center",
+    "State Senator": "Sasha Ren\u00e9e P\u00e9rez (SD-25)",
+    "State Senator Email": "senator.perez@senate.ca.gov",
+    "Assemblymember": "John Harabedian (AD-41)",
+    "Assemblymember Email": "assemblymember.harabedian@assembly.ca.gov",
+    "County Supervisor": "Kathryn Barger (District 5)",
+    "County Supervisor Email": "kathryn@bos.lacounty.gov",
+    "LA City Councilmember": "NaN",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "Pasadena",
+    "Lat": 34.1524,
+    "Lon": -118.1678
+  },
+  {
+    "Venue": "Rose Bowl Stadium",
+    "State Senator": "Sasha Ren\u00e9e P\u00e9rez (SD-25)",
+    "State Senator Email": "senator.perez@senate.ca.gov",
+    "Assemblymember": "John Harabedian (AD-41)",
+    "Assemblymember Email": "assemblymember.harabedian@assembly.ca.gov",
+    "County Supervisor": "Kathryn Barger (District 5)",
+    "County Supervisor Email": "kathryn@bos.lacounty.gov",
+    "LA City Councilmember": "NaN",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "Pasadena",
+    "Lat": 34.1613,
+    "Lon": -118.1676
+  },
+  {
+    "Venue": "Honda Center",
+    "State Senator": "Tom Umberg (SD-34)",
+    "State Senator Email": "senator.umberg@senate.ca.gov",
+    "Assemblymember": "Avelino Valencia (AD-68)",
+    "Assemblymember Email": "assemblymember.valencia@assembly.ca.gov",
+    "County Supervisor": "NaN",
+    "County Supervisor Email": "NaN",
+    "LA City Councilmember": "NaN",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "Anaheim",
+    "Lat": 33.8078,
+    "Lon": -117.8765
+  },
+  {
+    "Venue": "Santa Anita Park",
+    "State Senator": "Sasha Ren\u00e9e P\u00e9rez (SD-25)",
+    "State Senator Email": "senator.perez@senate.ca.gov",
+    "Assemblymember": "Mike Fong (AD-49)",
+    "Assemblymember Email": "assemblymember.mikefong@assembly.ca.gov",
+    "County Supervisor": "Kathryn Barger (District 5)",
+    "County Supervisor Email": "kathryn@bos.lacounty.gov",
+    "LA City Councilmember": "NaN",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "Arcadia",
+    "Lat": 34.1408,
+    "Lon": -118.044
+  },
+  {
+    "Venue": "Industry Hills MTB",
+    "State Senator": "Bob Archuleta (SD-30)",
+    "State Senator Email": "senator.archuleta@senate.ca.gov",
+    "Assemblymember": "Lisa Calderon (AD-56)",
+    "Assemblymember Email": "assemblymember.calderon@assembly.ca.gov",
+    "County Supervisor": "Hilda Solis (District 1)",
+    "County Supervisor Email": "firstdistrict@bos.lacounty.gov",
+    "LA City Councilmember": "NaN",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "City of Industry",
+    "Lat": 34.02,
+    "Lon": -117.935
+  },
+  {
+    "Venue": "Fairgrounds Cricket Stadium",
+    "State Senator": "Susan Rubio (SD-22)",
+    "State Senator Email": "senator.rubio@senate.ca.gov",
+    "Assemblymember": "Michelle Rodriguez (AD-53)",
+    "Assemblymember Email": "assemblymember.rodriguez@assembly.ca.gov",
+    "County Supervisor": "Hilda Solis (District 1)",
+    "County Supervisor Email": "firstdistrict@bos.lacounty.gov",
+    "LA City Councilmember": "NaN",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "Pomona",
+    "Lat": 34.0818,
+    "Lon": -117.7667
+  },
+  {
+    "Venue": "Trestles State Beach",
+    "State Senator": "Tony Strickland (SD-36)",
+    "State Senator Email": "senator.strickland@senate.ca.gov",
+    "Assemblymember": "Laurie Davies (AD-74)",
+    "Assemblymember Email": "assemblymember.davies@assembly.ca.gov",
+    "County Supervisor": "NaN",
+    "County Supervisor Email": "NaN",
+    "LA City Councilmember": "NaN",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "Trestles Beach",
+    "Lat": 33.3857,
+    "Lon": -117.5936
+  },
+  {
+    "Venue": "Whittier Narrows Clay Shooting Center",
+    "State Senator": "Susan Rubio (SD-22)",
+    "State Senator Email": "senator.rubio@senate.ca.gov",
+    "Assemblymember": "Lisa Calderon (AD-56)",
+    "Assemblymember Email": "assemblymember.calderon@assembly.ca.gov",
+    "County Supervisor": "Hilda Solis (District 1)",
+    "County Supervisor Email": "firstdistrict@bos.lacounty.gov",
+    "LA City Councilmember": "NaN",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "Whittier Narrows",
+    "Lat": 34.0305,
+    "Lon": -118.0537
+  },
+  {
+    "Venue": "San Jose Stadium",
+    "State Senator": "Dave Cortese (SD-15)",
+    "State Senator Email": "senator.cortese@senate.ca.gov",
+    "Assemblymember": "Ash Kalra (AD-25)",
+    "Assemblymember Email": "assemblymember.kalra@assembly.ca.gov",
+    "County Supervisor": "NaN",
+    "County Supervisor Email": "NaN",
+    "LA City Councilmember": "NaN",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "San Jose",
+    "Lat": 37.3512,
+    "Lon": -121.9248
+  },
+  {
+    "Venue": "San Diego Stadium",
+    "State Senator": "Akilah Weber Pierson (SD 39)",
+    "State Senator Email": "senator.weberpierson@senate.ca.gov",
+    "Assemblymember": "Christopher M. Ward (AD 78)",
+    "Assemblymember Email": "assemblymember.ward@assembly.ca.gov",
+    "County Supervisor": "NaN",
+    "County Supervisor Email": "NaN",
+    "LA City Councilmember": "NaN",
+    "LA City Councilmember Email": "NaN",
+    "Zone": "San Diego",
+    "Lat": 32.7831,
+    "Lon": -117.1196
+  }
+];
+
+        const zoneColors = {
+            'DTLA': '#d6001c',
+            'Exposition Park': '#f26b21',
+            'Long Beach': '#00a1e0',
+            'Pasadena': '#002664',
+            'Valley': '#43b02a',
+            'Inglewood': '#7d287d',
+            'Carson': '#78d64b',
+            'Venice': '#e5007c',
+            'Universal City': '#0072ce',
+            'Rivera': '#00563f',
+            'Anaheim': '#ffb81c',
+            'Arcadia': '#8a3b2b',
+            'City of Industry': '#8c1d40',
+            'Pomona': '#4b2e83',
+            'Trestles Beach': '#009b77',
+            'Whittier Narrows': '#a89968',
+            'San Jose': '#002664',
+            'San Diego': '#002664',
+            'N/A': '#333333'
+        };
+
+        const laCenter = [33.95, -118.25];
+        const laZoom = 10;
+        const caCenter = [35.5, -119.5];
+        const caZoom = 6;
+        const caMiniMapZoom = 5;
+
+        let isZoomedOut = false;
+
+        const mainMap = L.map('main-map', {zoomControl: true}).setView(laCenter, laZoom);
+        const miniMap = L.map('mini-map', {
+            zoomControl: false,
+            attributionControl: false,
+            dragging: false,
+            scrollWheelZoom: false,
+            doubleClickZoom: false
+        }).setView(caCenter, caMiniMapZoom);
+
+        const cartoUrl = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+        L.tileLayer(cartoUrl, {
+            attribution: '&copy; OpenStreetMap &copy; CARTO',
+            subdomains: 'abcd',
+            maxZoom: 19
+        }).addTo(mainMap);
+        L.tileLayer(cartoUrl, {
+            subdomains: 'abcd',
+            maxZoom: 10
+        }).addTo(miniMap);
+
+        function createColorIcon(zone) {
+            const color = zoneColors[zone] || zoneColors['N/A'];
+            return L.divIcon({
+                className: 'custom-div-icon',
+                html: `<div class="marker-dot" style="background-color: ${color};"></div>`,
+                iconSize: [14, 14],
+                iconAnchor: [7, 7]
+            });
+        }
+
+        const navyIcon = L.divIcon({
+            className: 'custom-div-icon',
+            html: `<div class="marker-dot" style="background-color: #002664;"></div>`,
+            iconSize: [14, 14],
+            iconAnchor: [7, 7]
+        });
+
+        function formatRepLink(repName, repEmail) {
+            const cleanName = repName ? String(repName).trim() : '';
+            const cleanEmail = repEmail ? String(repEmail).trim() : '';
+            if (!cleanName || cleanName === 'N/A' || cleanName === 'NaN' || cleanName === 'nan') return ''; 
+            if (!cleanEmail || cleanEmail === 'N/A' || cleanEmail === 'NaN' || cleanEmail === 'nan') return cleanName;
+            return `<a href="mailto:${cleanEmail}" class="rep-link">${cleanName}</a>`;
+        }
+
+        function getOverlayContent(venue) {
+            const color = zoneColors[venue['Zone']] || zoneColors['N/A'];
+            let content = `<div class="popup-title">${venue['Venue']}</div>`;
+            
+            if (venue['Zone'] && venue['Zone'] !== 'N/A' && venue['Zone'] !== 'NaN') {
+                content += `<div class="popup-info"><span class="zone-label" style="color: ${color};">${venue['Zone']} Zone</span></div>`;
+            }
+            
+            const cityCouncilStr = formatRepLink(venue['LA City Councilmember'], venue['LA City Councilmember Email']);
+            if (cityCouncilStr) content += `<div class="popup-info"><span class="rep-label">City Council:</span> ${cityCouncilStr}</div>`;
+            
+            const countySupStr = formatRepLink(venue['County Supervisor'], venue['County Supervisor Email']);
+            if (countySupStr) content += `<div class="popup-info"><span class="rep-label">County Sup.:</span> ${countySupStr}</div>`;
+            
+            const asmStr = formatRepLink(venue['Assemblymember'], venue['Assemblymember Email']);
+            if (asmStr) content += `<div class="popup-info"><span class="rep-label">Assembly:</span> ${asmStr}</div>`;
+            
+            const senateStr = formatRepLink(venue['State Senator'], venue['State Senator Email']);
+            if (senateStr) content += `<div class="popup-info"><span class="rep-label">State Senate:</span> ${senateStr}</div>`;
+            
+            return content;
+        }
+
+        // Overlay State
+        const overlay = document.getElementById('custom-overlay');
+        const overlayContent = document.getElementById('overlay-content');
+        const overlayTail = document.getElementById('overlay-tail');
+        
+        let activeMarker = null;
+        let lockedMarker = null;
+
+        // Function to update the math and position of the custom overlay
+        function updateOverlayPosition() {
+            if (!activeMarker) {
+                overlay.classList.remove('visible');
+                return;
+            }
+
+            overlay.classList.add('visible');
+
+            // Get pin coordinates relative to the map container
+            const pt = mainMap.latLngToContainerPoint(activeMarker.getLatLng());
+            const mapW = mainMap.getSize().x;
+            const mapH = mainMap.getSize().y;
+
+            // Get actual dimensions of the generated bubble
+            const w = overlayContent.offsetWidth;
+            const h = overlayContent.offsetHeight;
+            
+            let top, left;
+            let tailHtml = '';
+
+            // Smart Positioning Checks
+            // The tailSize acts as our exact mathematical offset from the center of the pin
+            const tailSize = 16; 
+
+            // Avoid Header: Needs ~15px gap from top of screen
+            const avoidTop = pt.y - h - tailSize - 10 < 0; 
+            
+            // Avoid Mini-Map: Bottom Left corner bounds
+            const inMiniMapZone = (pt.x < 300 && pt.y > mapH - 260);
+            
+            // Avoid Left/Right edges
+            const avoidLeft = pt.x < (w / 2 + 25) || inMiniMapZone;
+            const avoidRight = pt.x > (mapW - w / 2 - 25);
+            
+            if (avoidTop) {
+                // BELOW placement (Tail points UP)
+                top = pt.y + tailSize; // Originates exactly at the bottom of the pin center
+                
+                if (avoidLeft) {
+                    left = pt.x; // Flush Left
+                    tailHtml = `<svg width="${tailSize}" height="${tailSize}"><polygon points="0,${tailSize} 0,0 ${tailSize},${tailSize}" fill="white"/></svg>`;
+                    overlayTail.style.top = `-${tailSize}px`;
+                    overlayTail.style.left = '0px';
+                    overlayContent.style.borderTopLeftRadius = '0px';
+                    overlayContent.style.borderTopRightRadius = '8px';
+                } else if (avoidRight) {
+                    left = pt.x - w; // Flush Right
+                    tailHtml = `<svg width="${tailSize}" height="${tailSize}"><polygon points="${tailSize},${tailSize} 0,${tailSize} ${tailSize},0" fill="white"/></svg>`;
+                    overlayTail.style.top = `-${tailSize}px`;
+                    overlayTail.style.left = `${w - tailSize}px`;
+                    overlayContent.style.borderTopRightRadius = '0px';
+                    overlayContent.style.borderTopLeftRadius = '8px';
+                } else {
+                    left = pt.x - (w / 2); // Center
+                    tailHtml = `<svg width="${tailSize*2}" height="${tailSize}"><polygon points="0,${tailSize} ${tailSize},0 ${tailSize*2},${tailSize}" fill="white"/></svg>`;
+                    overlayTail.style.top = `-${tailSize}px`;
+                    overlayTail.style.left = `${(w / 2) - tailSize}px`;
+                    overlayContent.style.borderTopLeftRadius = '8px';
+                    overlayContent.style.borderTopRightRadius = '8px';
+                }
+            } else {
+                // ABOVE placement (Tail points DOWN)
+                top = pt.y - h - tailSize; // Originates exactly at the top of the pin center
+                
+                if (avoidLeft) {
+                    left = pt.x; // Flush Left
+                    tailHtml = `<svg width="${tailSize}" height="${tailSize}"><polygon points="0,0 0,${tailSize} ${tailSize},0" fill="white"/></svg>`;
+                    overlayTail.style.top = `${h}px`;
+                    overlayTail.style.left = '0px';
+                    overlayContent.style.borderBottomLeftRadius = '0px';
+                    overlayContent.style.borderBottomRightRadius = '8px';
+                } else if (avoidRight) {
+                    left = pt.x - w; // Flush Right
+                    tailHtml = `<svg width="${tailSize}" height="${tailSize}"><polygon points="${tailSize},0 0,0 ${tailSize},${tailSize}" fill="white"/></svg>`;
+                    overlayTail.style.top = `${h}px`;
+                    overlayTail.style.left = `${w - tailSize}px`;
+                    overlayContent.style.borderBottomRightRadius = '0px';
+                    overlayContent.style.borderBottomLeftRadius = '8px';
+                } else {
+                    left = pt.x - (w / 2); // Center
+                    tailHtml = `<svg width="${tailSize*2}" height="${tailSize}"><polygon points="0,0 ${tailSize*2},0 ${tailSize},${tailSize}" fill="white"/></svg>`;
+                    overlayTail.style.top = `${h}px`;
+                    overlayTail.style.left = `${(w / 2) - tailSize}px`;
+                    overlayContent.style.borderBottomLeftRadius = '8px';
+                    overlayContent.style.borderBottomRightRadius = '8px';
+                }
+            }
+
+            overlay.style.top = top + 'px';
+            overlay.style.left = left + 'px';
+            overlayTail.innerHTML = tailHtml;
+        }
+
+        const miniMapNavyLayer = L.layerGroup();
+        const miniMapColorLayer = L.layerGroup();
+        const allMarkers = [];
+
+        allVenues.forEach(venue => {
+            const icon = createColorIcon(venue.Zone);
+            const mainMarker = L.marker([venue.Lat, venue.Lon], {icon: icon}).addTo(mainMap);
+            mainMarker.venueData = venue;
+            allMarkers.push(mainMarker);
+
+            mainMarker.on('mouseover', function(e) {
+                if (!lockedMarker) {
+                    activeMarker = this;
+                    overlayContent.innerHTML = getOverlayContent(this.venueData);
+                    updateOverlayPosition();
+                }
+            });
+
+            mainMarker.on('mouseout', function(e) {
+                if (!lockedMarker) {
+                    activeMarker = null;
+                    updateOverlayPosition();
+                }
+            });
+
+            mainMarker.on('click', function(e) {
+                L.DomEvent.stopPropagation(e);
+                
+                // Tactile bump animation
+                if (this._icon) {
+                    L.DomUtil.removeClass(this._icon, 'bump-marker');
+                    void this._icon.offsetWidth; // trigger reflow to restart animation
+                    L.DomUtil.addClass(this._icon, 'bump-marker');
+                }
+
+                if (lockedMarker === this) {
+                    // Toggle Off
+                    lockedMarker = null;
+                    overlay.classList.remove('locked');
+                } else {
+                    // Toggle On
+                    lockedMarker = this;
+                    activeMarker = this;
+                    overlay.classList.add('locked');
+                    overlayContent.innerHTML = getOverlayContent(this.venueData);
+                    updateOverlayPosition();
+                }
+            });
+
+            L.marker([venue.Lat, venue.Lon], {icon: icon, interactive: false}).addTo(miniMapColorLayer);
+        });
+
+        // Clear locks on background click
+        mainMap.on('click', function() {
+            if (lockedMarker) {
+                lockedMarker = null;
+                activeMarker = null;
+                overlay.classList.remove('locked');
+                updateOverlayPosition();
+            }
+        });
+        
+        // Let user interact with overlay emails without hiding it (when locked)
+        overlay.addEventListener('click', function(e) {
+            L.DomEvent.stopPropagation(e);
+        });
+
+        // Keep overlay pinned dynamically during zoom/pan animations
+        mainMap.on('move', updateOverlayPosition);
+        mainMap.on('zoom', updateOverlayPosition);
+
+        // Populate minimap dots
+        L.marker([34.0522, -118.2437], {icon: navyIcon, interactive: false}).addTo(miniMapNavyLayer);
+        L.marker([37.3512, -121.9248], {icon: navyIcon, interactive: false}).addTo(miniMapNavyLayer);
+        L.marker([32.7831, -117.1196], {icon: navyIcon, interactive: false}).addTo(miniMapNavyLayer);
+        L.marker([33.3857, -117.5936], {icon: navyIcon, interactive: false}).addTo(miniMapNavyLayer);
+
+        miniMapNavyLayer.addTo(miniMap);
+
+        function swapMapScope() {
+            if (!isZoomedOut) {
+                mainMap.flyTo(caCenter, caZoom, {duration: 1.2});
+                miniMap.flyTo(laCenter, 8, {duration: 1.2});
+                miniMap.removeLayer(miniMapNavyLayer);
+                miniMapColorLayer.addTo(miniMap);
+                isZoomedOut = true;
+            } else {
+                mainMap.flyTo(laCenter, laZoom, {duration: 1.2});
+                miniMap.flyTo(caCenter, caMiniMapZoom, {duration: 1.2});
+                miniMap.removeLayer(miniMapColorLayer);
+                miniMapNavyLayer.addTo(miniMap);
+                isZoomedOut = false;
+            }
+        }
+
+        document.getElementById('mini-map-overlay').addEventListener('click', swapMapScope);
+
+    </script>
+</body>
+</html>
